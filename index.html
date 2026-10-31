@@ -1,1 +1,258 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <title>Match Intelligence Pro</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-icon">MI</div>
+    <div>
+      <strong>Match Intelligence Pro</strong>
+      <small>SPORTS DATA & ANALYTICS</small>
+    </div>
+  </div>
+  <div class="connection">
+    <span id="connectionDot"></span>
+    <span id="connectionText">Checking...</span>
+  </div>
+</header>
+
+<main>
+
+  <section class="welcome">
+    <p class="eyebrow">DATA MANAGEMENT CENTER</p>
+    <h1>Historical Data</h1>
+    <p>Manage your cricket, football and tennis historical records in one place.</p>
+  </section>
+
+  <section class="stats-grid">
+    <div class="stat-card">
+      <span>Total matches</span>
+      <strong id="totalMatches">0</strong>
+    </div>
+    <div class="stat-card">
+      <span>Sports covered</span>
+      <strong id="totalSports">0</strong>
+    </div>
+    <div class="stat-card">
+      <span>Data storage</span>
+      <strong id="storageStatus">Local</strong>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">01 / SPORT SELECTION</p>
+        <h2>Select sport</h2>
+      </div>
+    </div>
+
+    <div class="sports-grid">
+      <button class="sport active" data-sport="Cricket">
+        <span>🏏</span>
+        <strong>Cricket</strong>
+      </button>
+
+      <button class="sport" data-sport="Football">
+        <span>⚽</span>
+        <strong>Football</strong>
+      </button>
+
+      <button class="sport" data-sport="Tennis">
+        <span>🎾</span>
+        <strong>Tennis</strong>
+      </button>
+    </div>
+
+    <p id="selectedSport" class="message">
+      Currently selected: Cricket
+    </p>
+  </section>
+
+  <section class="panel" id="importSection">
+    <p class="eyebrow">02 / HISTORICAL DATABASE</p>
+    <h2>Import match records</h2>
+
+    <p class="description">
+      Upload a CSV file containing historical match results.
+      Your selected sport will be applied to records that do not
+      already specify a sport.
+    </p>
+
+    <label for="matchFile">Choose CSV dataset</label>
+    <input id="matchFile" type="file" accept=".csv,text/csv">
+
+    <button id="importMatches" class="primary full">
+      Import historical matches
+    </button>
+
+    <div id="importMessage" class="notice hidden"></div>
+
+    <div class="divider"></div>
+
+    <h3>CSV format</h3>
+    <p class="description">
+      Required columns: date, home_team, away_team, winner.
+      You can also include sport, competition, format, scores,
+      venue and surface.
+    </p>
+
+    <button id="downloadTemplate" class="secondary full">
+      Download sample CSV template
+    </button>
+  </section>
+
+  <section class="panel">
+    <p class="eyebrow">03 / DATABASE EXPLORER</p>
+    <h2>Historical records</h2>
+
+    <div class="input-grid">
+      <div>
+        <label for="filterSport">Sport</label>
+        <select id="filterSport">
+          <option value="All">All sports</option>
+          <option value="Cricket">Cricket</option>
+          <option value="Football">Football</option>
+          <option value="Tennis">Tennis</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="filterTeam">Search team/player</label>
+        <input id="filterTeam" placeholder="Enter name">
+      </div>
+    </div>
+
+    <div class="input-grid">
+      <div>
+        <label for="filterFrom">From date</label>
+        <input type="date" id="filterFrom">
+      </div>
+
+      <div>
+        <label for="filterTo">To date</label>
+        <input type="date" id="filterTo">
+      </div>
+    </div>
+
+    <button id="applyFilters" class="secondary full">
+      Apply filters
+    </button>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Sport</th>
+            <th>Participants</th>
+            <th>Winner</th>
+          </tr>
+        </thead>
+        <tbody id="matchTable">
+          <tr>
+            <td colspan="4">No records imported yet.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p id="recordCount" class="description">
+      Showing 0 records
+    </p>
+  </section>
+
+  <section class="panel">
+    <p class="eyebrow">04 / DATA QUALITY</p>
+    <h2>Database health</h2>
+
+    <div class="health-row">
+      <span>Valid records</span>
+      <strong id="validRecords">0</strong>
+    </div>
+
+    <div class="health-row">
+      <span>Rejected records</span>
+      <strong id="rejectedRecords">0</strong>
+    </div>
+
+    <div class="health-row">
+      <span>Duplicate records skipped</span>
+      <strong id="duplicateRecords">0</strong>
+    </div>
+
+    <p class="description">
+      Import reports are stored for the current browser session.
+      Duplicate matches are identified using their sport, date,
+      competition, participants and format.
+    </p>
+  </section>
+
+  <section class="panel">
+    <p class="eyebrow">05 / BACKUP & RECOVERY</p>
+    <h2>Manage your data</h2>
+
+    <button id="exportJSON" class="primary full">
+      Export complete database (JSON)
+    </button>
+
+    <button id="exportCSV" class="secondary full">
+      Export matches (CSV)
+    </button>
+
+    <label for="backupFile">Restore database backup</label>
+    <input id="backupFile" type="file" accept=".json">
+
+    <button id="restoreBackup" class="secondary full">
+      Restore backup
+    </button>
+
+    <button id="clearDatabase" class="danger full">
+      Delete all local records
+    </button>
+
+    <p class="description">
+      Export your backup regularly. Clearing browser data can
+      permanently remove your local database.
+    </p>
+  </section>
+
+  <section class="panel">
+    <p class="eyebrow">06 / CLOUD CONNECTION</p>
+    <h2>Cloud synchronization</h2>
+
+    <p class="description">
+      Local database is active. Cloud synchronization has not
+      yet been configured.
+    </p>
+
+    <div class="health-row">
+      <span>Local database</span>
+      <strong class="success-text">Active</strong>
+    </div>
+
+    <div class="health-row">
+      <span>Cloud database</span>
+      <strong id="cloudStatus">Not connected</strong>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <p>Match Intelligence Pro · Historical Data Module</p>
+  <small>Statistical research only. Historical outcomes do not guarantee future results.</small>
+</footer>
+
+</body>
+</html>
+
