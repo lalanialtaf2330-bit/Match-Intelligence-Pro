@@ -85,6 +85,16 @@ function writeIndexedMatches(records) {
   });
 }
 
+function deleteIndexedMatches() {
+  return new Promise((resolve, reject) => {
+    if (!database) { resolve(); return; }
+    const transaction = database.transaction(MATCH_STORE, "readwrite");
+    transaction.objectStore(MATCH_STORE).clear();
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
 async function saveDatabase() {
   try {
     if (database) await writeIndexedMatches(matches);
@@ -559,91 +569,74 @@ function exportCSV() {
 
 async function restoreBackup() {
   const input = getElement("backupFile");
-
-  if (!input.files.length) {
-    alert("Select a JSON backup first.");
-    return;
-  }
-
-  if (!confirm("Replace your current database with this backup?")) {
-    return;
-  }
+  if (!input.files.length) { alert("Select a JSON backup first."); return; }
+  if (!confirm("Replace your current database with this backup?")) return;
 
   try {
     const file = input.files[0];
-
-    if (file.size > 20 * 1024 * 1024) {
-      throw new Error("Backup must be smaller than 20 MB.");
-    }
-
+    if (file.size > 20 * 1024 * 1024) throw new Error("Backup must be smaller than 20 MB.");
     const backup = JSON.parse(await file.text());
-
-    const restored = Array.isArray(backup)
-      ? backup
-      : backup.matches;
-
-    if (!Array.isArray(restored)) {
-      throw new Error("Invalid backup file.");
-    }
+    const sourceRecords = Array.isArray(backup) ? backup : backup.matches;
+    if (!Array.isArray(sourceRecords)) throw new Error("Invalid backup file.");
 
     const keys = new Set();
-
-    for (const match of restored) {
-      const error = validateMatch(match);
-
+    const restored = sourceRecords.map(record => {
+      const normalized = { ...record, id: record.id || crypto.randomUUID() };
+      const error = validateMatch(normalized);
       if (error) throw new Error(error);
-
-      const key = createMatchKey(match);
-
-      if (keys.has(key)) {
-        throw new Error("Backup contains duplicate matches.");
-      }
-
+      const key = createMatchKey(normalized);
+      if (keys.has(key)) throw new Error("Backup contains duplicate matches.");
       keys.add(key);
-    }
+      return normalized;
+    });
 
     matches = restored;
-    await saveDatabase();
-
-    importReport = { valid: 0, rejected: 0, duplicates: 0 };
-
+    if (!await saveDatabase()) throw new Error("The backup could not be persisted.");
+    importReport = { valid: restored.length, rejected: 0, duplicates: 0 };
     updateDashboard();
     renderMatches();
     updateHealth();
-
     input.value = "";
-
     alert("Backup restored successfully.");
-
   } catch (error) {
+    console.error(error);
     alert("Restore failed: " + error.message);
   }
 }
 
-function clearDatabase() {
-  if (!matches.length) {
-    alert("Database is already empty.");
-    return;
+function clearDatabase()async function clearDatabase() {
+  if (!matches.length) { alert("Database is already empty."); return; }
+  if (!confirm("Permanently delete all local match records?")) return;
+
+  try {
+    await deleteIndexedMatches();
+    localStorage.removeItem(STORAGE_KEY);
+    matches = [];
+    importReport = { valid: 0, rejected: 0, duplicates: 0 };
+    updateDashboard();
+    renderMatches();
+    updateHealth();
+    alert("Database cleared.");
+  } catch (error) {
+    console.error(error);
+    alert("Database could not be cleared completely. No success was reported.");
   }
-
-  if (!confirm("Permanently delete all local match records?")) {
-    return;
-  }
-
-  matches = [];
-  importReport = { valid: 0, rejected: 0, duplicates: 0 };
-
-  updateDashboard();
-  renderMatches();
-  updateHealth();
-
-  alert("Database cleared.");
 }
 
+function participantAnalyticsfunction appendAnalyticsCard(container, label, value) {
+  const card = document.createElement("div");
+  card.className = "analytics-card";
+  const caption = document.createElement("span");
+  caption.textContent = label;
+  const result = document.createElement("strong");
+  result.textContent = value;
+  card.append(caption, result);
+  container.appendChild(card);
+}
 
-function participantAnalytics(name, sport) {
+function participantAnalytics(name, sport, history = matches) {
   const normalized = name.toLowerCase().trim();
-  const records = matches.filter(match => {
+  const records = history.filter(match => {
     const sportMatch = sport === "All" || match.sport === sport;
     const participantMatch = match.home_team.toLowerCase() === normalized ||
       match.away_team.toLowerCase() === normalized;
@@ -651,74 +644,118 @@ function participantAnalytics(name, sport) {
   });
   const wins = records.filter(match => match.winner.toLowerCase() === normalized).length;
   const draws = records.filter(match => match.winner.toLowerCase() === "draw").length;
-  return { matches: records.length, wins, draws, losses: records.length - wins - draws };
+  const noResults = records.filter(match => match.winner.toLowerCase() === "no result").length;
+  return { matches: records.length, wins, draws, noResults, losses: records.length - wins - draws - noResults };
 }
 
 function renderAnalytics() {
   const name = getElement("analyticsTeam").value.trim();
   const output = getElement("analyticsResults");
+  output.replaceChildren();
   if (!name) { output.textContent = "Enter a team or player."; return; }
   const result = participantAnalytics(name, getElement("analyticsSport").value);
   if (!result.matches) { output.textContent = "No matching historical records found."; return; }
   const rate = result.wins / result.matches;
-  output.innerHTML = ["Matches","Wins","Draws","Losses","Win rate"].map((label, i) => {
-    const values = [result.matches,result.wins,result.draws,result.losses,(rate * 100).toFixed(1) + "%"];
-    return "<div class=\"analytics-card\"><span>" + label + "</span><strong>" + values[i] + "</strong></div>";
-  }).join("");
+  appendAnalyticsCard(output, "Matches", result.matches);
+  appendAnalyticsCard(output, "Wins", result.wins);
+  appendAnalyticsCard(output, "Draws", result.draws);
+  appendAnalyticsCard(output, "No results", result.noResults);
+  appendAnalyticsCard(output, "Losses", result.losses);
+  appendAnalyticsCard(output, "Win rate", (rate * 100).toFixed(1) + "%");
+}
+
+function calculateOutcomeEstimate(home, away, sport, history) {
+  const homeData = participantAnalytics(home, sport, history);
+  const awayData = participantAnalytics(away, sport, history);
+  const homeEligible = homeData.wins + homeData.losses;
+  const awayEligible = awayData.wins + awayData.losses;
+  if (homeEligible + awayEligible < 2) return null;
+  const homeRate = homeEligible ? homeData.wins / homeEligible : 0.5;
+  const awayRate = awayEligible ? awayData.wins / awayEligible : 0.5;
+  const total = homeRate + awayRate || 1;
+  return { homeProbability: homeRate / total, awayProbability: awayRate / total, trainingRecords: homeEligible + awayEligible };
 }
 
 function renderPrediction() {
   const home = getElement("predictionHome").value.trim();
   const away = getElement("predictionAway").value.trim();
   const output = getElement("predictionResults");
+  output.replaceChildren();
   if (!home || !away) { output.textContent = "Enter both participants."; return; }
-  const homeData = participantAnalytics(home, selectedSport);
-  const awayData = participantAnalytics(away, selectedSport);
-  const homeRate = homeData.matches ? homeData.wins / homeData.matches : 0.5;
-  const awayRate = awayData.matches ? awayData.wins / awayData.matches : 0.5;
-  const total = homeRate + awayRate || 1;
-  const homeProbability = homeRate / total;
-  const awayProbability = awayRate / total;
-  output.innerHTML = "<div class=\"analytics-card\"><span>" + home + " estimated probability</span><strong>" +
-    (homeProbability * 100).toFixed(1) + "%</strong><div class=\"prediction-bar\"><span style=\"width:" +
-    (homeProbability * 100) + "%\"></span></div></div><div class=\"analytics-card\"><span>" + away +
-    " estimated probability</span><strong>" + (awayProbability * 100).toFixed(1) +
-    "%</strong><div class=\"prediction-bar\"><span style=\"width:" + (awayProbability * 100) +
-    "%\"></span></div></div>";
+  const estimate = calculateOutcomeEstimate(home, away, selectedSport, matches);
+  if (!estimate) {
+    output.textContent = "Insufficient historical data. At least two completed, non-draw results are required.";
+    return;
+  }
+  const homeCard = document.createElement("div");
+  homeCard.className = "analytics-card";
+  const homeText = document.createElement("span");
+  homeText.textContent = home + " estimated probability";
+  const homeValue = document.createElement("strong");
+  homeValue.textContent = (estimate.homeProbability * 100).toFixed(1) + "%";
+  homeCard.append(homeText, homeValue);
+  const awayCard = document.createElement("div");
+  awayCard.className = "analytics-card";
+  const awayText = document.createElement("span");
+  awayText.textContent = away + " estimated probability";
+  const awayValue = document.createElement("strong");
+  awayValue.textContent = (estimate.awayProbability * 100).toFixed(1) + "%";
+  awayCard.append(awayText, awayValue);
+  output.append(homeCard, awayCard);
 }
 
 function runBacktest() {
-  const eligible = matches.filter(match => match.winner && match.home_team && match.away_team);
-  let correct = 0;
-  eligible.forEach(match => {
-    const home = participantAnalytics(match.home_team, match.sport);
-    const away = participantAnalytics(match.away_team, match.sport);
-    const homeRate = home.matches ? home.wins / home.matches : 0.5;
-    const awayRate = away.matches ? away.wins / away.matches : 0.5;
-    const predicted = homeRate >= awayRate ? match.home_team : match.away_team;
-    if (predicted.toLowerCase() === match.winner.toLowerCase()) correct++;
-  });
   const output = getElement("backtestResults");
-  output.textContent = eligible.length ? "Evaluated " + eligible.length + " records. Accuracy: " +
-    ((correct / eligible.length) * 100).toFixed(1) + "%." : "Not enough records for backtesting.";
+  output.replaceChildren();
+  const ordered = matches.filter(match => match.home_team && match.away_team && match.winner)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const minimumTraining = 3;
+  const excluded = { draws: 0, noResults: 0, insufficient: 0 };
+  let evaluated = 0;
+  let correct = 0;
+
+  ordered.forEach((match, index) => {
+    const winner = match.winner.toLowerCase();
+    if (winner === "draw") { excluded.draws++; return; }
+    if (winner === "no result") { excluded.noResults++; return; }
+    const prior = ordered.slice(0, index).filter(item => item.sport === match.sport);
+    if (prior.length < minimumTraining) { excluded.insufficient++; return; }
+    const estimate = calculateOutcomeEstimate(match.home_team, match.away_team, match.sport, prior);
+    if (!estimate) { excluded.insufficient++; return; }
+    const predicted = estimate.homeProbability >= estimate.awayProbability
+      ? match.home_team.toLowerCase() : match.away_team.toLowerCase();
+    evaluated++;
+    if (predicted === winner) correct++;
+  });
+
+  appendAnalyticsCard(output, "Evaluated predictions", evaluated);
+  appendAnalyticsCard(output, "Correct predictions", correct);
+  appendAnalyticsCard(output, "Incorrect predictions", evaluated - correct);
+  appendAnalyticsCard(output, "Draws excluded", excluded.draws);
+  appendAnalyticsCard(output, "No results excluded", excluded.noResults);
+  appendAnalyticsCard(output, "Insufficient history", excluded.insufficient);
+  const note = document.createElement("p");
+  note.className = "description";
+  note.textContent = evaluated
+    ? "Out-of-sample estimate only; accuracy is not proof of future performance. Accuracy: " + ((correct / evaluated) * 100).toFixed(1) + "%."
+    : "Insufficient chronological history for an out-of-sample accuracy estimate.";
+  output.appendChild(note);
 }
 
-function syncCloud() {
+function syncCloud()function syncCloud() {
   const config = window.MATCH_INTELLIGENCE_SUPABASE || {};
   const message = getElement("syncMessage");
   const status = getElement("cloudStatus");
-
   if (!config.url || !config.anonKey) {
     status.textContent = "Not configured";
-    message.textContent = "Add the public Supabase URL and anon key to supabase-config.js to enable synchronization.";
+    message.textContent = "Cloud synchronization is disabled until the public Supabase URL and anon key are configured.";
     return;
   }
-
-  status.textContent = "Ready";
-  message.textContent = "Supabase credentials detected. Cloud table and authentication policies still require configuration.";
+  status.textContent = "Configuration detected";
+  message.textContent = "Credentials are present, but synchronization is not enabled until the Supabase table, authentication, and policies are configured.";
 }
 
-function setupEventListeners() {
+function setupEventListeners()function setupEventListeners() {
   getElement("importMatches").addEventListener("click", importCSV);
   getElement("downloadTemplate").addEventListener("click", downloadTemplate);
   getElement("applyFilters").addEventListener("click", renderMatches);
