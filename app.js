@@ -640,6 +640,69 @@ function clearDatabase() {
   alert("Database cleared.");
 }
 
+
+function participantAnalytics(name, sport) {
+  const normalized = name.toLowerCase().trim();
+  const records = matches.filter(match => {
+    const sportMatch = sport === "All" || match.sport === sport;
+    const participantMatch = match.home_team.toLowerCase() === normalized ||
+      match.away_team.toLowerCase() === normalized;
+    return sportMatch && participantMatch;
+  });
+  const wins = records.filter(match => match.winner.toLowerCase() === normalized).length;
+  const draws = records.filter(match => match.winner.toLowerCase() === "draw").length;
+  return { matches: records.length, wins, draws, losses: records.length - wins - draws };
+}
+
+function renderAnalytics() {
+  const name = getElement("analyticsTeam").value.trim();
+  const output = getElement("analyticsResults");
+  if (!name) { output.textContent = "Enter a team or player."; return; }
+  const result = participantAnalytics(name, getElement("analyticsSport").value);
+  if (!result.matches) { output.textContent = "No matching historical records found."; return; }
+  const rate = result.wins / result.matches;
+  output.innerHTML = ["Matches","Wins","Draws","Losses","Win rate"].map((label, i) => {
+    const values = [result.matches,result.wins,result.draws,result.losses,(rate * 100).toFixed(1) + "%"];
+    return "<div class=\"analytics-card\"><span>" + label + "</span><strong>" + values[i] + "</strong></div>";
+  }).join("");
+}
+
+function renderPrediction() {
+  const home = getElement("predictionHome").value.trim();
+  const away = getElement("predictionAway").value.trim();
+  const output = getElement("predictionResults");
+  if (!home || !away) { output.textContent = "Enter both participants."; return; }
+  const homeData = participantAnalytics(home, selectedSport);
+  const awayData = participantAnalytics(away, selectedSport);
+  const homeRate = homeData.matches ? homeData.wins / homeData.matches : 0.5;
+  const awayRate = awayData.matches ? awayData.wins / awayData.matches : 0.5;
+  const total = homeRate + awayRate || 1;
+  const homeProbability = homeRate / total;
+  const awayProbability = awayRate / total;
+  output.innerHTML = "<div class=\"analytics-card\"><span>" + home + " estimated probability</span><strong>" +
+    (homeProbability * 100).toFixed(1) + "%</strong><div class=\"prediction-bar\"><span style=\"width:" +
+    (homeProbability * 100) + "%\"></span></div></div><div class=\"analytics-card\"><span>" + away +
+    " estimated probability</span><strong>" + (awayProbability * 100).toFixed(1) +
+    "%</strong><div class=\"prediction-bar\"><span style=\"width:" + (awayProbability * 100) +
+    "%\"></span></div></div>";
+}
+
+function runBacktest() {
+  const eligible = matches.filter(match => match.winner && match.home_team && match.away_team);
+  let correct = 0;
+  eligible.forEach(match => {
+    const home = participantAnalytics(match.home_team, match.sport);
+    const away = participantAnalytics(match.away_team, match.sport);
+    const homeRate = home.matches ? home.wins / home.matches : 0.5;
+    const awayRate = away.matches ? away.wins / away.matches : 0.5;
+    const predicted = homeRate >= awayRate ? match.home_team : match.away_team;
+    if (predicted.toLowerCase() === match.winner.toLowerCase()) correct++;
+  });
+  const output = getElement("backtestResults");
+  output.textContent = eligible.length ? "Evaluated " + eligible.length + " records. Accuracy: " +
+    ((correct / eligible.length) * 100).toFixed(1) + "%." : "Not enough records for backtesting.";
+}
+
 function setupEventListeners() {
   getElement("importMatches").addEventListener("click", importCSV);
   getElement("downloadTemplate").addEventListener("click", downloadTemplate);
@@ -648,6 +711,9 @@ function setupEventListeners() {
   getElement("exportCSV").addEventListener("click", exportCSV);
   getElement("restoreBackup").addEventListener("click", restoreBackup);
   getElement("clearDatabase").addEventListener("click", clearDatabase);
+  getElement("runAnalytics").addEventListener("click", renderAnalytics);
+  getElement("runPrediction").addEventListener("click", renderPrediction);
+  getElement("runBacktest").addEventListener("click", runBacktest);
 
   getElement("filterTeam").addEventListener("input", renderMatches);
   getElement("filterSport").addEventListener("change", renderMatches);
