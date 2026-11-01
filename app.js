@@ -177,8 +177,6 @@ function isValidDate(date) {
   );
 }
 
-}
-
 function validateMatch(match) {
   if (!isValidDate(match.date)) {
     return "Invalid date.";
