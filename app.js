@@ -166,12 +166,17 @@ function isValidDate(date) {
     return false;
   }
 
-  const parsed = new Date(date + "T00:00:00");
+  const [year, month, day] = date.split("-").map(Number);
+
+  const parsed = new Date(Date.UTC(year, month - 1, day));
 
   return (
-    !Number.isNaN(parsed.getTime()) &&
-    parsed.toISOString().slice(0, 10) === date
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
   );
+}
+
 }
 
 function validateMatch(match) {
