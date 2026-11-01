@@ -604,7 +604,7 @@ async function restoreBackup() {
   }
 }
 
-function clearDatabase()async function clearDatabase() {
+async function clearDatabase() {
   if (!matches.length) { alert("Database is already empty."); return; }
   if (!confirm("Permanently delete all local match records?")) return;
 
@@ -623,7 +623,7 @@ function clearDatabase()async function clearDatabase() {
   }
 }
 
-function participantAnalyticsfunction appendAnalyticsCard(container, label, value) {
+function appendAnalyticsCard(container, label, value) {
   const card = document.createElement("div");
   card.className = "analytics-card";
   const caption = document.createElement("span");
@@ -742,7 +742,7 @@ function runBacktest() {
   output.appendChild(note);
 }
 
-function syncCloud()function syncCloud() {
+function syncCloud() {
   const config = window.MATCH_INTELLIGENCE_SUPABASE || {};
   const message = getElement("syncMessage");
   const status = getElement("cloudStatus");
