@@ -703,6 +703,21 @@ function runBacktest() {
     ((correct / eligible.length) * 100).toFixed(1) + "%." : "Not enough records for backtesting.";
 }
 
+function syncCloud() {
+  const config = window.MATCH_INTELLIGENCE_SUPABASE || {};
+  const message = getElement("syncMessage");
+  const status = getElement("cloudStatus");
+
+  if (!config.url || !config.anonKey) {
+    status.textContent = "Not configured";
+    message.textContent = "Add the public Supabase URL and anon key to supabase-config.js to enable synchronization.";
+    return;
+  }
+
+  status.textContent = "Ready";
+  message.textContent = "Supabase credentials detected. Cloud table and authentication policies still require configuration.";
+}
+
 function setupEventListeners() {
   getElement("importMatches").addEventListener("click", importCSV);
   getElement("downloadTemplate").addEventListener("click", downloadTemplate);
@@ -714,6 +729,7 @@ function setupEventListeners() {
   getElement("runAnalytics").addEventListener("click", renderAnalytics);
   getElement("runPrediction").addEventListener("click", renderPrediction);
   getElement("runBacktest").addEventListener("click", runBacktest);
+  getElement("syncCloud").addEventListener("click", syncCloud);
 
   getElement("filterTeam").addEventListener("input", renderMatches);
   getElement("filterSport").addEventListener("change", renderMatches);
@@ -726,6 +742,7 @@ async function startApplication() {
   setupSportSelection();
   setupEventListeners();
   updateConnectionStatus();
+  syncCloud();
   updateDashboard();
   updateHealth();
   renderMatches();
