@@ -396,7 +396,7 @@ async function importCSV() {
     const updatedMatches = [...matches, ...newMatches];
 
     matches = updatedMatches;
-    await saveDatabase();
+    if (!await saveDatabase()) throw new Error("The imported records could not be persisted.");
 
     updateDashboard();
     renderMatches();
