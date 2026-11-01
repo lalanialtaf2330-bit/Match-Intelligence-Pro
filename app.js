@@ -2,11 +2,16 @@
 "use strict";
 
 const STORAGE_KEY = "matchIntelligenceProDatabase";
+const DATABASE_NAME = "matchIntelligencePro";
+const DATABASE_VERSION = 1;
+const MATCH_STORE = "matches";
 
 const SPORTS = ["Cricket", "Football", "Tennis"];
 
 let selectedSport = "Cricket";
 let matches = [];
+let database = null;
+let storageMode = "localStorage";
 
 let importReport = {
   valid: 0,
@@ -32,44 +37,92 @@ function hideMessage(element) {
   element.classList.add("hidden");
 }
 
-function saveDatabase() {
-  try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(matches)
-    );
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error("IndexedDB is not supported."));
+      return;
+    }
 
+    const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+
+    request.onupgradeneeded = event => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains(MATCH_STORE)) {
+        const store = db.createObjectStore(MATCH_STORE, { keyPath: "id" });
+        store.createIndex("date", "date", { unique: false });
+        store.createIndex("sport", "sport", { unique: false });
+      }
+    };
+
+    request.onsuccess = () => {
+      database = request.result;
+      storageMode = "IndexedDB";
+      resolve(database);
+    };
+
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function readIndexedMatches() {
+  return new Promise((resolve, reject) => {
+    const request = database.transaction(MATCH_STORE, "readonly")
+      .objectStore(MATCH_STORE).getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function writeIndexedMatches(records) {
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(MATCH_STORE, "readwrite");
+    const store = transaction.objectStore(MATCH_STORE);
+    store.clear();
+    records.forEach(record => store.put(record));
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+async function saveDatabase() {
+  try {
+    if (database) await writeIndexedMatches(matches);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(matches));
     updateDashboard();
     return true;
-
   } catch (error) {
-    alert("Unable to save database. Storage may be full.");
+    alert("Unable to save database.");
     console.error(error);
     return false;
   }
 }
 
-function loadDatabase() {
+async function loadDatabase() {
   try {
+    await openDatabase();
     const saved = localStorage.getItem(STORAGE_KEY);
+    const localRecords = saved ? JSON.parse(saved) : [];
+    const indexedRecords = await readIndexedMatches();
+    const keys = new Set(indexedRecords.map(createMatchKey));
+    const merged = [...indexedRecords];
 
-    if (!saved) {
-      matches = [];
-      return;
-    }
+    localRecords.forEach(record => {
+      if (!record.id) record.id = crypto.randomUUID();
+      if (!keys.has(createMatchKey(record))) {
+        keys.add(createMatchKey(record));
+        merged.push(record);
+      }
+    });
 
-    const data = JSON.parse(saved);
-
-    if (!Array.isArray(data)) {
-      throw new Error("Invalid database.");
-    }
-
-    matches = data;
-
+    matches = merged;
+    await writeIndexedMatches(matches);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(matches));
   } catch (error) {
-    matches = [];
+    storageMode = "localStorage";
     console.error(error);
-    alert("Unable to load saved database.");
+    const saved = localStorage.getItem(STORAGE_KEY);
+    matches = saved ? JSON.parse(saved) : [];
   }
 }
 
@@ -332,12 +385,8 @@ async function importCSV() {
 
     const updatedMatches = [...matches, ...newMatches];
 
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(updatedMatches)
-    );
-
     matches = updatedMatches;
+    await saveDatabase();
 
     updateDashboard();
     renderMatches();
@@ -366,7 +415,7 @@ function updateDashboard() {
 
   getElement("totalSports").textContent = sports.size;
 
-  getElement("storageStatus").textContent = "Local";
+  getElement("storageStatus").textContent = storageMode;
 }
 
 function updateHealth() {
@@ -553,9 +602,8 @@ async function restoreBackup() {
       keys.add(key);
     }
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(restored));
-
     matches = restored;
+    await saveDatabase();
 
     importReport = { valid: 0, rejected: 0, duplicates: 0 };
 
@@ -582,8 +630,6 @@ function clearDatabase() {
     return;
   }
 
-  localStorage.removeItem(STORAGE_KEY);
-
   matches = [];
   importReport = { valid: 0, rejected: 0, duplicates: 0 };
 
@@ -609,8 +655,8 @@ function setupEventListeners() {
   getElement("filterTo").addEventListener("change", renderMatches);
 }
 
-function startApplication() {
-  loadDatabase();
+async function startApplication() {
+  await loadDatabase();
   setupSportSelection();
   setupEventListeners();
   updateConnectionStatus();
