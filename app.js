@@ -755,7 +755,7 @@ function syncCloud() {
   message.textContent = "Credentials are present, but synchronization is not enabled until the Supabase table, authentication, and policies are configured.";
 }
 
-function setupEventListeners()function setupEventListeners() {
+function setupEventListeners() {
   getElement("importMatches").addEventListener("click", importCSV);
   getElement("downloadTemplate").addEventListener("click", downloadTemplate);
   getElement("applyFilters").addEventListener("click", renderMatches);
