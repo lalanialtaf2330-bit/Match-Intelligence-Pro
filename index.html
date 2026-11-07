@@ -7,6 +7,7 @@
   <meta name="theme-color" content="#ffffff">
   <title>Match Intelligence Pro</title>
   <link rel="stylesheet" href="./styles.css">
+  <script src="./supabase-config.js" defer></script>
   <script src="./app.js" defer></script>
 </head>
 <body>
@@ -226,13 +227,86 @@
     </p>
   </section>
 
+  <section class="panel" id="analyticsSection">
+    <p class="eyebrow">07 / ANALYTICS</p>
+    <h2>Performance analytics</h2>
+    <div class="input-grid">
+      <div>
+        <label for="analyticsTeam">Team or player</label>
+        <input id="analyticsTeam" placeholder="Enter name">
+      </div>
+      <div>
+        <label for="analyticsSport">Sport</label>
+        <select id="analyticsSport">
+          <option value="All">All sports</option>
+          <option value="Cricket">Cricket</option>
+          <option value="Football">Football</option>
+          <option value="Tennis">Tennis</option>
+        </select>
+      </div>
+    </div>
+    <button id="runAnalytics" class="primary full">Calculate analytics</button>
+    <div id="analyticsResults" class="analytics-results"></div>
+  </section>
+
+  <section class="panel" id="predictionSection">
+    <p class="eyebrow">08 / PREDICTION FOUNDATION</p>
+    <h2>Probabilistic prediction</h2>
+    <p class="description">Statistical estimates only; historical outcomes do not guarantee future results.</p>
+    <div class="input-grid">
+      <div>
+        <label for="predictionHome">Home participant</label>
+        <input id="predictionHome">
+      </div>
+      <div>
+        <label for="predictionAway">Away participant</label>
+        <input id="predictionAway">
+      </div>
+    </div>
+    <button id="runPrediction" class="primary full">Generate estimate</button>
+    <div id="predictionResults" class="analytics-results"></div>
+  </section>
+
+  <section class="panel" id="sessionSection">
+    <p class="eyebrow">08A / SESSION ESTIMATES</p>
+    <h2>Sport-specific session estimate</h2>
+    <p class="description">Sessions are derived from the selected sport and the same imported history. Granular session data is required for validation.</p>
+    <label for="sessionMarket">Session</label>
+    <select id="sessionMarket"></select>
+    <button id="runSessionPrediction" class="secondary full">Generate session estimate</button>
+    <div id="sessionResults" class="analytics-results"></div>
+  </section>
+
+  <section class="panel" id="bankrollSection">
+    <p class="eyebrow">09A / PERFORMANCE JOURNAL</p>
+    <h2>Local bankroll tracking</h2>
+    <p class="description">Record settled outcomes for performance review. This is not staking advice.</p>
+    <div class="input-grid"><div><label for="stakeAmount">Stake</label><input id="stakeAmount" type="number" min="0.01" step="0.01"></div><div><label for="settledOdds">Decimal odds</label><input id="settledOdds" type="number" min="1.01" step="0.01"></div></div>
+    <label for="betOutcome">Settled outcome</label><select id="betOutcome"><option value="win">Win</option><option value="loss">Loss</option></select>
+    <button id="saveBankroll" class="secondary full">Save settled entry</button>
+    <p id="bankrollSummary" class="description"></p>
+  </section>
+
+  <section class="panel" id="liveSection">
+    <p class="eyebrow">09B / LIVE DATA</p>
+    <h2>Live-feed readiness</h2>
+    <div class="health-row"><span>Live data status</span><strong id="liveStatus">Manual import only</strong></div>
+    <p class="description">No live or odds feed is claimed until a licensed provider is connected through a server-side proxy. Never expose API keys in this browser app.</p>
+  </section>
+
+  <section class="panel" id="backtestSection">
+    <p class="eyebrow">09 / MODEL EVALUATION</p>
+    <h2>Backtesting and calibration</h2>
+    <button id="runBacktest" class="secondary full">Run historical backtest</button>
+    <div id="backtestResults" class="analytics-results"></div>
+  </section>
+
   <section class="panel">
     <p class="eyebrow">06 / CLOUD CONNECTION</p>
     <h2>Cloud synchronization</h2>
 
     <p class="description">
-      Local database is active. Cloud synchronization has not
-      yet been configured.
+      Local database works offline. Cloud synchronization is prepared but not configured.
     </p>
 
     <div class="health-row">
@@ -242,8 +316,11 @@
 
     <div class="health-row">
       <span>Cloud database</span>
-      <strong id="cloudStatus">Not connected</strong>
+      <strong id="cloudStatus">Not configured</strong>
     </div>
+
+    <button id="syncCloud" class="secondary full">Synchronize cloud database</button>
+    <p id="syncMessage" class="description"></p>
   </section>
 
 </main>

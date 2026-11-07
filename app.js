@@ -2,11 +2,16 @@
 "use strict";
 
 const STORAGE_KEY = "matchIntelligenceProDatabase";
+const DATABASE_NAME = "matchIntelligencePro";
+const DATABASE_VERSION = 1;
+const MATCH_STORE = "matches";
 
 const SPORTS = ["Cricket", "Football", "Tennis"];
 
 let selectedSport = "Cricket";
 let matches = [];
+let database = null;
+let storageMode = "localStorage";
 
 let importReport = {
   valid: 0,
@@ -32,44 +37,102 @@ function hideMessage(element) {
   element.classList.add("hidden");
 }
 
-function saveDatabase() {
-  try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(matches)
-    );
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error("IndexedDB is not supported."));
+      return;
+    }
 
+    const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+
+    request.onupgradeneeded = event => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains(MATCH_STORE)) {
+        const store = db.createObjectStore(MATCH_STORE, { keyPath: "id" });
+        store.createIndex("date", "date", { unique: false });
+        store.createIndex("sport", "sport", { unique: false });
+      }
+    };
+
+    request.onsuccess = () => {
+      database = request.result;
+      storageMode = "IndexedDB";
+      resolve(database);
+    };
+
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function readIndexedMatches() {
+  return new Promise((resolve, reject) => {
+    const request = database.transaction(MATCH_STORE, "readonly")
+      .objectStore(MATCH_STORE).getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function writeIndexedMatches(records) {
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(MATCH_STORE, "readwrite");
+    const store = transaction.objectStore(MATCH_STORE);
+    store.clear();
+    records.forEach(record => store.put(record));
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+function deleteIndexedMatches() {
+  return new Promise((resolve, reject) => {
+    if (!database) { resolve(); return; }
+    const transaction = database.transaction(MATCH_STORE, "readwrite");
+    transaction.objectStore(MATCH_STORE).clear();
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+async function saveDatabase() {
+  try {
+    if (database) await writeIndexedMatches(matches);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(matches));
     updateDashboard();
     return true;
-
   } catch (error) {
-    alert("Unable to save database. Storage may be full.");
+    alert("Unable to save database.");
     console.error(error);
     return false;
   }
 }
 
-function loadDatabase() {
+async function loadDatabase() {
   try {
+    await openDatabase();
     const saved = localStorage.getItem(STORAGE_KEY);
+    const localRecords = saved ? JSON.parse(saved) : [];
+    const indexedRecords = await readIndexedMatches();
+    const keys = new Set(indexedRecords.map(createMatchKey));
+    const merged = [...indexedRecords];
 
-    if (!saved) {
-      matches = [];
-      return;
-    }
+    localRecords.forEach(record => {
+      if (!record.id) record.id = crypto.randomUUID();
+      if (!keys.has(createMatchKey(record))) {
+        keys.add(createMatchKey(record));
+        merged.push(record);
+      }
+    });
 
-    const data = JSON.parse(saved);
-
-    if (!Array.isArray(data)) {
-      throw new Error("Invalid database.");
-    }
-
-    matches = data;
-
+    matches = merged;
+    await writeIndexedMatches(matches);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(matches));
   } catch (error) {
-    matches = [];
+    storageMode = "localStorage";
     console.error(error);
-    alert("Unable to load saved database.");
+    const saved = localStorage.getItem(STORAGE_KEY);
+    matches = saved ? JSON.parse(saved) : [];
   }
 }
 
@@ -104,6 +167,7 @@ function setupSportSelection() {
 
       getElement("selectedSport").textContent =
         "Currently selected: " + selectedSport;
+      updateSessionMarkets();
     });
   });
 }
@@ -332,12 +396,8 @@ async function importCSV() {
 
     const updatedMatches = [...matches, ...newMatches];
 
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(updatedMatches)
-    );
-
     matches = updatedMatches;
+    if (!await saveDatabase()) throw new Error("The imported records could not be persisted.");
 
     updateDashboard();
     renderMatches();
@@ -366,7 +426,7 @@ function updateDashboard() {
 
   getElement("totalSports").textContent = sports.size;
 
-  getElement("storageStatus").textContent = "Local";
+  getElement("storageStatus").textContent = storageMode;
 }
 
 function updateHealth() {
@@ -510,88 +570,235 @@ function exportCSV() {
 
 async function restoreBackup() {
   const input = getElement("backupFile");
-
-  if (!input.files.length) {
-    alert("Select a JSON backup first.");
-    return;
-  }
-
-  if (!confirm("Replace your current database with this backup?")) {
-    return;
-  }
+  if (!input.files.length) { alert("Select a JSON backup first."); return; }
+  if (!confirm("Replace your current database with this backup?")) return;
 
   try {
     const file = input.files[0];
-
-    if (file.size > 20 * 1024 * 1024) {
-      throw new Error("Backup must be smaller than 20 MB.");
-    }
-
+    if (file.size > 20 * 1024 * 1024) throw new Error("Backup must be smaller than 20 MB.");
     const backup = JSON.parse(await file.text());
-
-    const restored = Array.isArray(backup)
-      ? backup
-      : backup.matches;
-
-    if (!Array.isArray(restored)) {
-      throw new Error("Invalid backup file.");
-    }
+    const sourceRecords = Array.isArray(backup) ? backup : backup.matches;
+    if (!Array.isArray(sourceRecords)) throw new Error("Invalid backup file.");
 
     const keys = new Set();
-
-    for (const match of restored) {
-      const error = validateMatch(match);
-
+    const restored = sourceRecords.map(record => {
+      const normalized = { ...record, id: record.id || crypto.randomUUID() };
+      const error = validateMatch(normalized);
       if (error) throw new Error(error);
-
-      const key = createMatchKey(match);
-
-      if (keys.has(key)) {
-        throw new Error("Backup contains duplicate matches.");
-      }
-
+      const key = createMatchKey(normalized);
+      if (keys.has(key)) throw new Error("Backup contains duplicate matches.");
       keys.add(key);
-    }
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(restored));
+      return normalized;
+    });
 
     matches = restored;
-
-    importReport = { valid: 0, rejected: 0, duplicates: 0 };
-
+    if (!await saveDatabase()) throw new Error("The backup could not be persisted.");
+    importReport = { valid: restored.length, rejected: 0, duplicates: 0 };
     updateDashboard();
     renderMatches();
     updateHealth();
-
     input.value = "";
-
     alert("Backup restored successfully.");
-
   } catch (error) {
+    console.error(error);
     alert("Restore failed: " + error.message);
   }
 }
 
-function clearDatabase() {
-  if (!matches.length) {
-    alert("Database is already empty.");
+async function clearDatabase() {
+  if (!matches.length) { alert("Database is already empty."); return; }
+  if (!confirm("Permanently delete all local match records?")) return;
+
+  try {
+    await deleteIndexedMatches();
+    localStorage.removeItem(STORAGE_KEY);
+    matches = [];
+    importReport = { valid: 0, rejected: 0, duplicates: 0 };
+    updateDashboard();
+    renderMatches();
+    updateHealth();
+    alert("Database cleared.");
+  } catch (error) {
+    console.error(error);
+    alert("Database could not be cleared completely. No success was reported.");
+  }
+}
+
+function appendAnalyticsCard(container, label, value) {
+  const card = document.createElement("div");
+  card.className = "analytics-card";
+  const caption = document.createElement("span");
+  caption.textContent = label;
+  const result = document.createElement("strong");
+  result.textContent = value;
+  card.append(caption, result);
+  container.appendChild(card);
+}
+
+function participantAnalytics(name, sport, history = matches) {
+  const normalized = name.toLowerCase().trim();
+  const records = history.filter(match => {
+    const sportMatch = sport === "All" || match.sport === sport;
+    const participantMatch = match.home_team.toLowerCase() === normalized ||
+      match.away_team.toLowerCase() === normalized;
+    return sportMatch && participantMatch;
+  });
+  const wins = records.filter(match => match.winner.toLowerCase() === normalized).length;
+  const draws = records.filter(match => match.winner.toLowerCase() === "draw").length;
+  const noResults = records.filter(match => match.winner.toLowerCase() === "no result").length;
+  return { matches: records.length, wins, draws, noResults, losses: records.length - wins - draws - noResults };
+}
+
+function renderAnalytics() {
+  const name = getElement("analyticsTeam").value.trim();
+  const output = getElement("analyticsResults");
+  output.replaceChildren();
+  if (!name) { output.textContent = "Enter a team or player."; return; }
+  const result = participantAnalytics(name, getElement("analyticsSport").value);
+  if (!result.matches) { output.textContent = "No matching historical records found."; return; }
+  const rate = result.wins / result.matches;
+  appendAnalyticsCard(output, "Matches", result.matches);
+  appendAnalyticsCard(output, "Wins", result.wins);
+  appendAnalyticsCard(output, "Draws", result.draws);
+  appendAnalyticsCard(output, "No results", result.noResults);
+  appendAnalyticsCard(output, "Losses", result.losses);
+  appendAnalyticsCard(output, "Win rate", (rate * 100).toFixed(1) + "%");
+}
+
+function calculateOutcomeEstimate(home, away, sport, history) {
+  const homeData = participantAnalytics(home, sport, history);
+  const awayData = participantAnalytics(away, sport, history);
+  const homeEligible = homeData.wins + homeData.losses;
+  const awayEligible = awayData.wins + awayData.losses;
+  if (homeEligible + awayEligible < 2) return null;
+  const homeRate = homeEligible ? homeData.wins / homeEligible : 0.5;
+  const awayRate = awayEligible ? awayData.wins / awayEligible : 0.5;
+  const total = homeRate + awayRate || 1;
+  return { homeProbability: homeRate / total, awayProbability: awayRate / total, trainingRecords: homeEligible + awayEligible };
+}
+
+function renderPrediction() {
+  const home = getElement("predictionHome").value.trim();
+  const away = getElement("predictionAway").value.trim();
+  const output = getElement("predictionResults");
+  output.replaceChildren();
+  if (!home || !away) { output.textContent = "Enter both participants."; return; }
+  const estimate = calculateOutcomeEstimate(home, away, selectedSport, matches);
+  if (!estimate) {
+    output.textContent = "Insufficient historical data. At least two completed, non-draw results are required.";
     return;
   }
+  const homeCard = document.createElement("div");
+  homeCard.className = "analytics-card";
+  const homeText = document.createElement("span");
+  homeText.textContent = home + " estimated probability";
+  const homeValue = document.createElement("strong");
+  homeValue.textContent = (estimate.homeProbability * 100).toFixed(1) + "%";
+  homeCard.append(homeText, homeValue);
+  const awayCard = document.createElement("div");
+  awayCard.className = "analytics-card";
+  const awayText = document.createElement("span");
+  awayText.textContent = away + " estimated probability";
+  const awayValue = document.createElement("strong");
+  awayValue.textContent = (estimate.awayProbability * 100).toFixed(1) + "%";
+  awayCard.append(awayText, awayValue);
+  output.append(homeCard, awayCard);
+  const dataQuality = document.createElement("p");
+  dataQuality.className = "description";
+  dataQuality.textContent = "Data quality: " + estimate.trainingRecords + " historical participant decisions. This estimate is not a guarantee or betting advice.";
+  output.appendChild(dataQuality);
+}
 
-  if (!confirm("Permanently delete all local match records?")) {
+const SESSION_MARKETS = {
+  Cricket: ["Powerplay (overs 1–6)", "Middle overs (7–15)", "Death overs (16–20)"],
+  Football: ["Minutes 0–15", "Minutes 16–30", "First half", "Second half"],
+  Tennis: ["First 3 games", "Games 4–6", "Next set"]
+};
+
+function updateSessionMarkets() {
+  const market = getElement("sessionMarket");
+  market.replaceChildren();
+  (SESSION_MARKETS[selectedSport] || []).forEach(name => market.add(new Option(name, name)));
+}
+
+function renderSessionPrediction() {
+  const output = getElement("sessionResults");
+  output.replaceChildren();
+  const home = getElement("predictionHome").value.trim();
+  const away = getElement("predictionAway").value.trim();
+  const estimate = calculateOutcomeEstimate(home, away, selectedSport, matches);
+  if (!home || !away || !estimate) { output.textContent = "Enter both participants and import sufficient history first."; return; }
+  const leader = estimate.homeProbability >= estimate.awayProbability ? home : away;
+  appendAnalyticsCard(output, getElement("sessionMarket").value, leader + " lean");
+  const note = document.createElement("p");
+  note.className = "description";
+  note.textContent = "Session confidence cannot be validated from match-result-only CSV files. Import over, minute, or point-level outcomes for sport-specific session backtesting.";
+  output.appendChild(note);
+}
+
+function saveBankrollEntry() {
+  const stake = Number(getElement("stakeAmount").value); const odds = Number(getElement("settledOdds").value);
+  if (!(stake > 0) || !(odds > 1)) { getElement("bankrollSummary").textContent = "Enter a stake and decimal odds above 1.00."; return; }
+  const entries = JSON.parse(localStorage.getItem("matchIntelligenceProBankroll") || "[]");
+  entries.push({ stake, odds, profit: getElement("betOutcome").value === "win" ? stake * (odds - 1) : -stake });
+  localStorage.setItem("matchIntelligenceProBankroll", JSON.stringify(entries)); renderBankroll();
+}
+
+function renderBankroll() {
+  const entries = JSON.parse(localStorage.getItem("matchIntelligenceProBankroll") || "[]");
+  const stake = entries.reduce((total, entry) => total + entry.stake, 0); const profit = entries.reduce((total, entry) => total + entry.profit, 0);
+  getElement("bankrollSummary").textContent = entries.length ? entries.length + " settled entries · Stake: " + stake.toFixed(2) + " · Net: " + profit.toFixed(2) + " · ROI: " + (stake ? (profit / stake * 100).toFixed(1) + "%" : "N/A") : "No locally saved performance entries.";
+}
+
+function runBacktest() {
+  const output = getElement("backtestResults");
+  output.replaceChildren();
+  const ordered = matches.filter(match => match.home_team && match.away_team && match.winner)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const minimumTraining = 3;
+  const excluded = { draws: 0, noResults: 0, insufficient: 0 };
+  let evaluated = 0;
+  let correct = 0;
+
+  ordered.forEach((match, index) => {
+    const winner = match.winner.toLowerCase();
+    if (winner === "draw") { excluded.draws++; return; }
+    if (winner === "no result") { excluded.noResults++; return; }
+    const prior = ordered.slice(0, index).filter(item => item.sport === match.sport);
+    if (prior.length < minimumTraining) { excluded.insufficient++; return; }
+    const estimate = calculateOutcomeEstimate(match.home_team, match.away_team, match.sport, prior);
+    if (!estimate) { excluded.insufficient++; return; }
+    const predicted = estimate.homeProbability >= estimate.awayProbability
+      ? match.home_team.toLowerCase() : match.away_team.toLowerCase();
+    evaluated++;
+    if (predicted === winner) correct++;
+  });
+
+  appendAnalyticsCard(output, "Evaluated predictions", evaluated);
+  appendAnalyticsCard(output, "Correct predictions", correct);
+  appendAnalyticsCard(output, "Incorrect predictions", evaluated - correct);
+  appendAnalyticsCard(output, "Draws excluded", excluded.draws);
+  appendAnalyticsCard(output, "No results excluded", excluded.noResults);
+  appendAnalyticsCard(output, "Insufficient history", excluded.insufficient);
+  const note = document.createElement("p");
+  note.className = "description";
+  note.textContent = evaluated
+    ? "Out-of-sample estimate only; accuracy is not proof of future performance. Accuracy: " + ((correct / evaluated) * 100).toFixed(1) + "%."
+    : "Insufficient chronological history for an out-of-sample accuracy estimate.";
+  output.appendChild(note);
+}
+
+function syncCloud() {
+  const config = window.MATCH_INTELLIGENCE_SUPABASE || {};
+  const message = getElement("syncMessage");
+  const status = getElement("cloudStatus");
+  if (!config.url || !config.anonKey) {
+    status.textContent = "Not configured";
+    message.textContent = "Cloud synchronization is disabled until the public Supabase URL and anon key are configured.";
     return;
   }
-
-  localStorage.removeItem(STORAGE_KEY);
-
-  matches = [];
-  importReport = { valid: 0, rejected: 0, duplicates: 0 };
-
-  updateDashboard();
-  renderMatches();
-  updateHealth();
-
-  alert("Database cleared.");
+  status.textContent = "Configuration detected";
+  message.textContent = "Credentials are present, but synchronization is not enabled until the Supabase table, authentication, and policies are configured.";
 }
 
 function setupEventListeners() {
@@ -602,6 +809,12 @@ function setupEventListeners() {
   getElement("exportCSV").addEventListener("click", exportCSV);
   getElement("restoreBackup").addEventListener("click", restoreBackup);
   getElement("clearDatabase").addEventListener("click", clearDatabase);
+  getElement("runAnalytics").addEventListener("click", renderAnalytics);
+  getElement("runPrediction").addEventListener("click", renderPrediction);
+  getElement("runSessionPrediction").addEventListener("click", renderSessionPrediction);
+  getElement("saveBankroll").addEventListener("click", saveBankrollEntry);
+  getElement("runBacktest").addEventListener("click", runBacktest);
+  getElement("syncCloud").addEventListener("click", syncCloud);
 
   getElement("filterTeam").addEventListener("input", renderMatches);
   getElement("filterSport").addEventListener("change", renderMatches);
@@ -609,14 +822,17 @@ function setupEventListeners() {
   getElement("filterTo").addEventListener("change", renderMatches);
 }
 
-function startApplication() {
-  loadDatabase();
+async function startApplication() {
+  await loadDatabase();
   setupSportSelection();
   setupEventListeners();
   updateConnectionStatus();
+  syncCloud();
   updateDashboard();
   updateHealth();
   renderMatches();
+  updateSessionMarkets();
+  renderBankroll();
 
   console.log("Match Intelligence Pro is ready.");
 }
