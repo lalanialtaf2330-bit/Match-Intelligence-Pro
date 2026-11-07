@@ -267,6 +267,33 @@
     <div id="predictionResults" class="analytics-results"></div>
   </section>
 
+  <section class="panel" id="sessionSection">
+    <p class="eyebrow">08A / SESSION ESTIMATES</p>
+    <h2>Sport-specific session estimate</h2>
+    <p class="description">Sessions are derived from the selected sport and the same imported history. Granular session data is required for validation.</p>
+    <label for="sessionMarket">Session</label>
+    <select id="sessionMarket"></select>
+    <button id="runSessionPrediction" class="secondary full">Generate session estimate</button>
+    <div id="sessionResults" class="analytics-results"></div>
+  </section>
+
+  <section class="panel" id="bankrollSection">
+    <p class="eyebrow">09A / PERFORMANCE JOURNAL</p>
+    <h2>Local bankroll tracking</h2>
+    <p class="description">Record settled outcomes for performance review. This is not staking advice.</p>
+    <div class="input-grid"><div><label for="stakeAmount">Stake</label><input id="stakeAmount" type="number" min="0.01" step="0.01"></div><div><label for="settledOdds">Decimal odds</label><input id="settledOdds" type="number" min="1.01" step="0.01"></div></div>
+    <label for="betOutcome">Settled outcome</label><select id="betOutcome"><option value="win">Win</option><option value="loss">Loss</option></select>
+    <button id="saveBankroll" class="secondary full">Save settled entry</button>
+    <p id="bankrollSummary" class="description"></p>
+  </section>
+
+  <section class="panel" id="liveSection">
+    <p class="eyebrow">09B / LIVE DATA</p>
+    <h2>Live-feed readiness</h2>
+    <div class="health-row"><span>Live data status</span><strong id="liveStatus">Manual import only</strong></div>
+    <p class="description">No live or odds feed is claimed until a licensed provider is connected through a server-side proxy. Never expose API keys in this browser app.</p>
+  </section>
+
   <section class="panel" id="backtestSection">
     <p class="eyebrow">09 / MODEL EVALUATION</p>
     <h2>Backtesting and calibration</h2>
