@@ -167,6 +167,7 @@ function setupSportSelection() {
 
       getElement("selectedSport").textContent =
         "Currently selected: " + selectedSport;
+      updateSessionMarkets();
     });
   });
 }
@@ -702,6 +703,51 @@ function renderPrediction() {
   awayValue.textContent = (estimate.awayProbability * 100).toFixed(1) + "%";
   awayCard.append(awayText, awayValue);
   output.append(homeCard, awayCard);
+  const dataQuality = document.createElement("p");
+  dataQuality.className = "description";
+  dataQuality.textContent = "Data quality: " + estimate.trainingRecords + " historical participant decisions. This estimate is not a guarantee or betting advice.";
+  output.appendChild(dataQuality);
+}
+
+const SESSION_MARKETS = {
+  Cricket: ["Powerplay (overs 1–6)", "Middle overs (7–15)", "Death overs (16–20)"],
+  Football: ["Minutes 0–15", "Minutes 16–30", "First half", "Second half"],
+  Tennis: ["First 3 games", "Games 4–6", "Next set"]
+};
+
+function updateSessionMarkets() {
+  const market = getElement("sessionMarket");
+  market.replaceChildren();
+  (SESSION_MARKETS[selectedSport] || []).forEach(name => market.add(new Option(name, name)));
+}
+
+function renderSessionPrediction() {
+  const output = getElement("sessionResults");
+  output.replaceChildren();
+  const home = getElement("predictionHome").value.trim();
+  const away = getElement("predictionAway").value.trim();
+  const estimate = calculateOutcomeEstimate(home, away, selectedSport, matches);
+  if (!home || !away || !estimate) { output.textContent = "Enter both participants and import sufficient history first."; return; }
+  const leader = estimate.homeProbability >= estimate.awayProbability ? home : away;
+  appendAnalyticsCard(output, getElement("sessionMarket").value, leader + " lean");
+  const note = document.createElement("p");
+  note.className = "description";
+  note.textContent = "Session confidence cannot be validated from match-result-only CSV files. Import over, minute, or point-level outcomes for sport-specific session backtesting.";
+  output.appendChild(note);
+}
+
+function saveBankrollEntry() {
+  const stake = Number(getElement("stakeAmount").value); const odds = Number(getElement("settledOdds").value);
+  if (!(stake > 0) || !(odds > 1)) { getElement("bankrollSummary").textContent = "Enter a stake and decimal odds above 1.00."; return; }
+  const entries = JSON.parse(localStorage.getItem("matchIntelligenceProBankroll") || "[]");
+  entries.push({ stake, odds, profit: getElement("betOutcome").value === "win" ? stake * (odds - 1) : -stake });
+  localStorage.setItem("matchIntelligenceProBankroll", JSON.stringify(entries)); renderBankroll();
+}
+
+function renderBankroll() {
+  const entries = JSON.parse(localStorage.getItem("matchIntelligenceProBankroll") || "[]");
+  const stake = entries.reduce((total, entry) => total + entry.stake, 0); const profit = entries.reduce((total, entry) => total + entry.profit, 0);
+  getElement("bankrollSummary").textContent = entries.length ? entries.length + " settled entries · Stake: " + stake.toFixed(2) + " · Net: " + profit.toFixed(2) + " · ROI: " + (stake ? (profit / stake * 100).toFixed(1) + "%" : "N/A") : "No locally saved performance entries.";
 }
 
 function runBacktest() {
@@ -765,6 +811,8 @@ function setupEventListeners() {
   getElement("clearDatabase").addEventListener("click", clearDatabase);
   getElement("runAnalytics").addEventListener("click", renderAnalytics);
   getElement("runPrediction").addEventListener("click", renderPrediction);
+  getElement("runSessionPrediction").addEventListener("click", renderSessionPrediction);
+  getElement("saveBankroll").addEventListener("click", saveBankrollEntry);
   getElement("runBacktest").addEventListener("click", runBacktest);
   getElement("syncCloud").addEventListener("click", syncCloud);
 
@@ -783,6 +831,8 @@ async function startApplication() {
   updateDashboard();
   updateHealth();
   renderMatches();
+  updateSessionMarkets();
+  renderBankroll();
 
   console.log("Match Intelligence Pro is ready.");
 }
